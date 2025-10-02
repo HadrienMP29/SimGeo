@@ -475,26 +475,37 @@ class Game:
         if not player_party: return False
 
         # Vérifier l'acceptation des partenaires
+        total_seats = self.player_country.parliament.seats_distribution.get(self.player_party_name, 0)
         for partner_name in partner_names:
             partner_party = next((p for p in self.player_country.political_parties if p.name == partner_name), None)
             if not partner_party: continue
+
+            total_seats += self.player_country.parliament.seats_distribution.get(partner_name, 0)
 
             # Calcul de la compatibilité idéologique
             compatibility = sum(player_party.stances.get(k, 0) * partner_party.stances.get(k, 0) for k in player_party.stances)
             if compatibility < 0: # Alliance contre-nature
                 self.log(f"❌ Négociations échouées : '{partner_name}' refuse de s'allier avec vous en raison de divergences idéologiques trop importantes.")
-                self.player_concede_power() # Échec, le joueur passe dans l'opposition
+                self.player_concede_power(from_negotiation_failure=True) # Échec, le joueur passe dans l'opposition
                 return False
 
-        self.log("✅ Négociations réussies ! Une coalition a été formée.")
-        self.player_is_in_power = True
-        self.game_state = "RUNNING"
-        return True
+        # Vérifier si la coalition a la majorité
+        if total_seats >= self.player_country.parliament.total_seats / 2:
+            self.log("✅ Négociations réussies ! Une coalition majoritaire a été formée.")
+            self.player_is_in_power = True
+            self.game_state = "RUNNING"
+            return True
+        else:
+            self.log("❌ La coalition formée n'est pas majoritaire. Vous ne pouvez pas gouverner.")
+            self.player_concede_power(from_negotiation_failure=True)
+            return False
 
-    def player_concede_power(self):
+    def player_concede_power(self, from_negotiation_failure=False):
         """Le joueur renonce à former un gouvernement et passe dans l'opposition."""
         if self.game_state != "COALITION_NEGOTIATION" or not self.player_country:
             return
+        if not from_negotiation_failure:
+            self.log("Vous avez choisi de ne pas former de gouvernement et d'entrer dans l'opposition.")
         _, coal_log = form_coalition(self.player_country, self.player_party_name, player_conceded=True)
         self.log(coal_log)
         self.player_is_in_power = False

@@ -117,15 +117,11 @@ def simulate_parliament_vote(country: Country, law: Law) -> bool:
 def form_coalition(country: Country, player_party_name: str, player_conceded: bool = False) -> Tuple[bool, str]:
     """Tente de former une coalition gouvernementale."""
     leading_party_name = max(country.parliament.seats_distribution, key=country.parliament.seats_distribution.get)
-    
-    if leading_party_name == player_party_name and not player_conceded:
-        # Le joueur a la main, mais la logique de formation est dans le game_engine
-        return True, "Vous avez la main pour former une coalition."
-    else:
-        # L'IA forme une coalition
-        log = f"Le parti '{leading_party_name}' a formé une coalition et prend la tête du gouvernement."
-        country.leader_party = leading_party_name
-        return False, log
+
+    # L'IA (ou le parti qui a le plus de sièges après concession du joueur) forme une coalition
+    log = f"Le parti '{leading_party_name}' a formé un gouvernement et prend la tête du pays."
+    country.leader_party = leading_party_name
+    return False, log
 
 def simulate_party_economy(country: Country):
     """Simule l'économie de chaque parti politique (revenus, dépenses)."""
