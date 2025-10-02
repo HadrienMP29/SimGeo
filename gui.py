@@ -52,31 +52,34 @@ class GeoGameGUI:
         self.game = Game()
 
         # --- Structure principale ---
-        ttk.Label(root, text="Simulateur Géopolitique", font=("Segoe UI", 20, "bold"), background=self.colors["bg"], foreground=self.colors["text"]).pack(pady=(15, 5))
+        top_bar = ttk.Frame(root)
+        top_bar.pack(fill="x", pady=(15, 5), padx=10)
+        top_bar.columnconfigure(0, weight=1)
+
+        ttk.Label(top_bar, text="Simulateur Géopolitique", font=("Segoe UI", 20, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Button(top_bar, text="Options ⚙️", command=self.open_options_menu, style="Text.TButton").grid(row=0, column=1, sticky="e")
+
         self.status_var = tk.StringVar()
         self.status_label = ttk.Label(root, textvariable=self.status_var, style="Info.TLabel")
-        self.status_label.pack(pady=(0, 15))
+        self.status_label.pack(pady=(0, 15), fill="x", padx=10)
         
         # --- Conteneur principal qui affichera la vue "pouvoir" ou "opposition" ---
         self.main_content_frame = ttk.Frame(root)
         self.main_content_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         # --- Création des deux vues principales ---
-        self.power_view = ttk.Frame(self.main_content_frame)
-        self.opposition_view = ttk.Frame(self.main_content_frame)
 
         # --- Panneau de contrôle (boutons communs) ---
         control_panel = ttk.Frame(root, style="Card.TLabelframe")
         control_panel.pack(side="bottom", fill="x", padx=10, pady=5)
 
-        ttk.Button(control_panel, text="✨ Nouvelle partie", command=self.new_game, style="Text.TButton").pack(side="left", padx=8, pady=4)
-        ttk.Button(control_panel, text="💾 Sauvegarder", command=self.save_game_named, style="Text.TButton").pack(side="left", padx=8, pady=4)
-        ttk.Button(control_panel, text="📂 Charger", command=self.load_game_named, style="Text.TButton").pack(side="left", padx=8, pady=4)
-        
         self.log_text = tk.Text(control_panel, height=4, wrap="word", font=("Consolas", 10), relief="flat", borderwidth=0, padx=10, pady=10)
         self.log_text.pack(side="left", fill="x", expand=True, padx=10)
         ttk.Button(control_panel, text="➡️ Tour Suivant", command=self.next_turn, style="Accent.TButton").pack(side="right", fill="y", padx=8, pady=4)
 
+        # --- Vues principales (pouvoir/opposition) ---
+        self.power_view = ttk.Frame(self.main_content_frame)
+        self.opposition_view = ttk.Frame(self.main_content_frame)
         # --- Contenu des onglets ---
         self.setup_government_tab()
         self.setup_opposition_tab()
@@ -84,21 +87,6 @@ class GeoGameGUI:
 
         # Lancer la première mise à jour
         self.new_game()
-
-        # --- Menu principal ---
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-
-        options_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Options", menu=options_menu)
-
-        theme_menu = tk.Menu(options_menu, tearoff=0)
-        options_menu.add_cascade(label="Thème", menu=theme_menu)
-        theme_menu.add_command(label="Clair", command=lambda: self.set_theme("light"))
-        theme_menu.add_command(label="Sombre", command=lambda: self.set_theme("dark"))
-
-        options_menu.add_separator()
-        options_menu.add_command(label="Quitter", command=self.quit_game)
 
     def log(self, message):
         """Ajoute un message au journal"""
@@ -246,6 +234,35 @@ class GeoGameGUI:
         # Implémentation du tri...
         pass
     
+    def open_options_menu(self):
+        """Ouvre la fenêtre modale des options."""
+        options_window = tk.Toplevel(self.root)
+        options_window.title("Options")
+        options_window.geometry("300x350")
+        options_window.transient(self.root)
+        options_window.grab_set()
+
+        frame = ttk.Frame(options_window, padding=20)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Button(frame, text="✨ Nouvelle partie", command=self.new_game, style="Text.TButton").pack(fill="x", pady=5)
+        ttk.Button(frame, text="💾 Sauvegarder la partie", command=self.save_game_named, style="Text.TButton").pack(fill="x", pady=5)
+        ttk.Button(frame, text="📂 Charger une partie", command=self.load_game_named, style="Text.TButton").pack(fill="x", pady=5)
+        ttk.Button(frame, text="🗑️ Supprimer une sauvegarde", command=self.delete_save_named, style="Text.TButton").pack(fill="x", pady=5)
+
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=15)
+
+        def toggle_theme():
+            if self.colors == self.LIGHT_THEME:
+                self.set_theme("dark")
+            else:
+                self.set_theme("light")
+
+        ttk.Button(frame, text="🌗 Changer de thème", command=toggle_theme, style="Text.TButton").pack(fill="x", pady=5)
+        
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=15)
+        ttk.Button(frame, text="🚪 Quitter le jeu", command=self.quit_game, style="Accent.TButton").pack(fill="x", pady=5)
+
     def setup_government_tab(self):
         """Configure la vue lorsque le joueur est au pouvoir."""
         pane = ttk.PanedWindow(self.power_view, orient=tk.HORIZONTAL)
