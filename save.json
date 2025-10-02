@@ -1,0 +1,60 @@
+{
+  "turn": 1,
+  "countries": [
+    {
+      "name": "France",
+      "population": 67,
+      "gdp": 2800,
+      "approval": 0.75,
+      "treasury": 75,
+      "tax_income": 0.2,
+      "tax_corporate": 0.25,
+      "tax_vat": 0.2,
+      "relations": {
+        "USA": 0,
+        "Chine": 0
+      },
+      "espionnage_success": 0
+    },
+    {
+      "name": "USA",
+      "population": 331,
+      "gdp": 23000,
+      "approval": 0.65,
+      "treasury": 500,
+      "tax_income": 0.2,
+      "tax_corporate": 0.25,
+      "tax_vat": 0.2,
+      "relations": {
+        "France": 0,
+        "Chine": 0
+      },
+      "espionnage_success": 0
+    },
+    {
+      "name": "Chine",
+      "population": 1400,
+      "gdp": 17000,
+      "approval": 0.8,
+      "treasury": 300,
+      "tax_income": 0.2,
+      "tax_corporate": 0.25,
+      "tax_vat": 0.2,
+      "relations": {
+        "France": 0,
+        "USA": 0
+      },
+      "espionnage_success": 0
+    }
+  ],
+  "alliances": [],
+  "approval_history": [
+    0.75
+  ],
+  "gdp_history": [
+    2800
+  ],
+  "treasury_history": [
+    100
+  ]
+}

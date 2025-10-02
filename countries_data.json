@@ -1,0 +1,10 @@
+{
+    "France": {"pop": 68, "gdp": 2950, "unemployment": 0.075, "debt": 3100, "growth": 0.009, "exports": 610, "imports": 700, "approval": 0.55, "treasury": 50},
+    "USA": {"pop": 335, "gdp": 25000, "unemployment": 0.038, "debt": 34000, "growth": 0.025, "exports": 2000, "imports": 3200, "approval": 0.50, "treasury": 200},
+    "China": {"pop": 1425, "gdp": 18000, "unemployment": 0.052, "debt": 15000, "growth": 0.05, "exports": 3400, "imports": 2600, "approval": 0.85, "treasury": 800},
+    "Germany": {"pop": 84, "gdp": 4100, "unemployment": 0.059, "debt": 2700, "growth": -0.003, "exports": 1550, "imports": 1440, "approval": 0.52, "treasury": 80},
+    "Royaume-Uni": {"pop": 67, "gdp": 3000, "unemployment": 0.042, "debt": 3000, "growth": 0.001, "exports": 920, "imports": 1010, "approval": 0.48, "treasury": 60},
+    "Russia": {"pop": 144, "gdp": 1900, "unemployment": 0.03, "debt": 320, "growth": 0.036, "exports": 390, "imports": 260, "approval": 0.75, "treasury": 100},
+    "Brazil": {"pop": 216, "gdp": 1900, "unemployment": 0.078, "debt": 1400, "growth": 0.029, "exports": 310, "imports": 250, "approval": 0.45, "treasury": 40},
+    "Canada": {"pop": 40, "gdp": 2000, "unemployment": 0.058, "debt": 1200, "growth": 0.011, "exports": 570, "imports": 580, "approval": 0.60, "treasury": 45}
+}
