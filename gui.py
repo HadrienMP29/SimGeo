@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter import font
 import ssl
+from datetime import timedelta
 from game_engine import Game
 from data_manager import list_saves, delete_save
 from matplotlib.figure import Figure
@@ -57,14 +58,14 @@ class GeoGameGUI:
         top_bar.columnconfigure(0, weight=1)
 
         ttk.Label(top_bar, text="Simulateur Géopolitique", font=("Segoe UI", 20, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Button(top_bar, text="Options ⚙️", command=self.open_options_menu, style="Text.TButton").grid(row=0, column=1, sticky="e")
+        ttk.Button(top_bar, text="Options ⚙️", command=lambda: self.switch_view(self.main_content_frame, self.options_view, "Options"), style="Text.TButton").grid(row=0, column=1, sticky="e")
 
         self.status_var = tk.StringVar()
         self.status_label = ttk.Label(root, textvariable=self.status_var, style="Info.TLabel")
         self.status_label.pack(pady=(0, 15), fill="x", padx=10)
         
         # --- Conteneur pour le panneau de news et le contenu principal ---
-        side_by_side_container = ttk.Frame(root)
+        side_by_side_container = ttk.Frame(root, name="side_by_side_container")
         side_by_side_container.pack(fill="both", expand=True)
 
         # --- Panneau d'événements (initialement caché) ---
@@ -78,11 +79,12 @@ class GeoGameGUI:
         self.news_text.pack(fill="both", expand=True, padx=10, pady=5)
 
         # --- Conteneur principal qui affichera la vue "pouvoir" ou "opposition" ---
-        self.main_content_frame = ttk.Frame(side_by_side_container)
+        self.main_content_frame = ttk.Frame(side_by_side_container, name="main_content_frame")
         self.main_content_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
 
         # --- Panneau de contrôle (boutons communs) ---
         control_panel = ttk.Frame(root, style="Card.TLabelframe")
+        self.control_panel = control_panel # Garder une référence
         control_panel.pack(side="bottom", fill="x", padx=10, pady=5)
         
         # --- Nouvelle barre de chronologie ---
@@ -106,14 +108,19 @@ class GeoGameGUI:
         self.country_tree = None # Le treeview sera créé à la demande
 
         # Lancer la première mise à jour
-        self.new_game()
-        
+        self.show_main_menu()
+
         # Raccourci clavier pour le tour suivant
         self.root.bind("<space>", lambda event: self.next_turn())
 
     def log(self, message):
         """Obsolète, les messages sont maintenant gérés par tour."""
         pass
+
+    def show_notification(self, message: str, title: str = "Information"):
+        """Affiche une notification dans le panneau de nouvelles."""
+        self.show_events_for_turn(-1, custom_logs=[message], custom_title=title)
+
 
     def update_status(self):
         """Met à jour la barre de statut et rafraîchit la diplomatie si ouverte"""
@@ -132,79 +139,24 @@ class GeoGameGUI:
             else:
                 self.status_label.config(foreground=self.colors["text"])
 
+        # Nettoyer le conteneur principal avant de reconstruire
+        for widget in self.main_content_frame.winfo_children():
+            widget.destroy()
+
+        # Recréer les vues pour s'assurer qu'elles existent
+        self.power_view = ttk.Frame(self.main_content_frame)
+        self.opposition_view = ttk.Frame(self.main_content_frame)
+
         # Gérer l'affichage de la vue "pouvoir" ou "opposition"
         if self.game.player_is_in_power:
-            self.opposition_view.pack_forget()
             self.power_view.pack(fill="both", expand=True)
+            if not self.power_view.winfo_children(): # Ne recréer que si c'est vide
+                self.setup_government_tab()
         else:
-            self.power_view.pack_forget()
             self.opposition_view.pack(fill="both", expand=True)
-
-    def new_game(self):
-        """Nouvelle partie"""
-        # Fenêtre modale pour choisir le parti
-        party_choice_window = tk.Toplevel(self.root)
-        party_choice_window.title("Choisissez votre parti")
-        party_choice_window.geometry("450x400")
-        party_choice_window.transient(self.root)
-        party_choice_window.grab_set()
-
-        ttk.Label(party_choice_window, text="Choisissez votre parti pour commencer", font=("Segoe UI", 14, "bold")).pack(pady=10)
-
-        # Utiliser les données de systems.py pour peupler la liste
-        from game_data import FRENCH_PARTIES
-        party_names = [p.name for p in FRENCH_PARTIES]
-        
-        listbox = tk.Listbox(party_choice_window, selectmode=tk.SINGLE, exportselection=False, font=("Segoe UI", 11))
-        for name in party_names:
-            listbox.insert(tk.END, name)
-        listbox.pack(fill="both", expand=True, padx=20, pady=10)
-        listbox.selection_set(0) # Sélectionner le premier par défaut
-
-        description_label = ttk.Label(party_choice_window, text="", wraplength=400)
-        description_label.pack(pady=5)
-
-        def show_party_info(event=None):
-            selected_indices = listbox.curselection()
-            if not selected_indices: return
-            party_name = listbox.get(selected_indices[0])
-            party = next((p for p in FRENCH_PARTIES if p.name == party_name), None)
-            if party:
-                stances_text = ", ".join([f"{domain}: {stance*100:.0f}%" for domain, stance in party.stances.items()])
-                description_label.config(text=f"Idéologie: {party.ideology}\nPositions: {stances_text}")
-
-        listbox.bind("<<ListboxSelect>>", show_party_info)
-        show_party_info() # Afficher les infos du premier parti
-
-        def on_choice_made():
-            selected_indices = listbox.curselection()
-            chosen_party = listbox.get(selected_indices[0]) if selected_indices else "Renaissance"
-            party_choice_window.destroy()
-            self.game.start_new_game(chosen_party)
-            self.process_turn_logs()
-            self.update_status()
-            self.update_countries_info()
-
-        ttk.Button(party_choice_window, text="Commencer la partie", command=on_choice_made, style="Accent.TButton").pack(pady=10)
-
-    def load_game(self):
-        """Charge une sauvegarde"""
-        if self.game.load_game():
-            self.show_events_for_turn(self.game.turn -1, ["📂 Partie chargée."])
-            self.update_status()
-        else:
-            messagebox.showinfo("Info", "Aucune sauvegarde trouvée.")
-
-    def save_game_named(self):
-        """Fenêtre pour choisir le nom de la sauvegarde"""
-        # Pour simplifier, on utilise une boîte de dialogue modale
-        name = tk.simpledialog.askstring("Sauvegarder", "Nom de la sauvegarde :", parent=self.root) # type: ignore
-        if name:
-            if name and self.game.player_country:
-                self.game.save_game_by_name(name)
-                self.show_events_for_turn(self.game.turn -1, self.game.get_and_clear_log())
-            else:
-                self.log("Sauvegarde annulée ou nom invalide.")
+            if not self.opposition_view.winfo_children(): # Ne recréer que si c'est vide
+                self.setup_opposition_tab()
+        self.control_panel.pack(side="bottom", fill="x", padx=10, pady=5) # S'assurer que le panneau est visible
 
     def load_game_named(self):
         """Fenêtre pour charger une sauvegarde existante"""
@@ -220,7 +172,7 @@ class GeoGameGUI:
                 self.update_status()
                 self.update_countries_info()
         else:
-            messagebox.showwarning("Erreur", f"Chargement annulé ou sauvegarde '{name}' introuvable.")
+            self.show_notification(f"Chargement annulé ou sauvegarde '{name}' introuvable.", "Erreur")
 
     def update_countries_info(self):
         """Met à jour le tableau d'informations des pays."""
@@ -247,43 +199,14 @@ class GeoGameGUI:
         name = tk.simpledialog.askstring("Supprimer", f"Sauvegardes disponibles: {', '.join(list_saves())}\n\nEntrez un nom:", parent=self.root) # type: ignore
         if name:
             if delete_save(name):
-                messagebox.showinfo("Succès", f"Sauvegarde '{name}' supprimée.")
+                self.show_notification(f"Sauvegarde '{name}' supprimée.", "Succès")
             else:
-                messagebox.showerror("Erreur", f"Impossible de supprimer '{name}'.")
+                self.show_notification(f"Impossible de supprimer '{name}'.", "Erreur")
 
     def sort_treeview(self, col, reverse):
         """Trie le Treeview par colonne."""
         # Implémentation du tri...
         pass
-    
-    def open_options_menu(self):
-        """Ouvre la fenêtre modale des options."""
-        options_window = tk.Toplevel(self.root)
-        options_window.title("Options")
-        options_window.geometry("300x350")
-        options_window.transient(self.root)
-        options_window.grab_set()
-
-        frame = ttk.Frame(options_window, padding=20)
-        frame.pack(fill="both", expand=True)
-
-        ttk.Button(frame, text="✨ Nouvelle partie", command=self.new_game, style="Text.TButton").pack(fill="x", pady=5)
-        ttk.Button(frame, text="💾 Sauvegarder la partie", command=self.save_game_named, style="Text.TButton").pack(fill="x", pady=5)
-        ttk.Button(frame, text="📂 Charger une partie", command=self.load_game_named, style="Text.TButton").pack(fill="x", pady=5)
-        ttk.Button(frame, text="🗑️ Supprimer une sauvegarde", command=self.delete_save_named, style="Text.TButton").pack(fill="x", pady=5)
-
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=15)
-
-        def toggle_theme():
-            if self.colors == self.LIGHT_THEME:
-                self.set_theme("dark")
-            else:
-                self.set_theme("light")
-
-        ttk.Button(frame, text="🌗 Changer de thème", command=toggle_theme, style="Text.TButton").pack(fill="x", pady=5)
-        
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=15)
-        ttk.Button(frame, text="🚪 Quitter le jeu", command=self.quit_game, style="Accent.TButton").pack(fill="x", pady=5)
 
     def setup_government_tab(self):
         """Configure la vue lorsque le joueur est au pouvoir."""
@@ -466,10 +389,10 @@ class GeoGameGUI:
 
     def quit_game(self):
         """Quitte le jeu."""
-        if messagebox.askokcancel("Quitter", "Êtes-vous sûr de vouloir quitter ?"):
-            if self.france:
-                pass # On pourrait afficher un graphique final ici
-            self.root.quit()
+        # On pourrait demander une confirmation ici via une vue intégrée, mais pour l'instant on quitte directement.
+        if self.france:
+            pass # On pourrait afficher un graphique final ici
+        self.root.quit()
 
     def check_game_state(self):
         """Vérifie l'état du jeu et déclenche les UI appropriées (ex: coalition)."""
@@ -480,9 +403,10 @@ class GeoGameGUI:
                 negotiator_name = sorted_parties[self.game.coalition_negotiator_rank][0]
                 self.game.negotiating_party_name = negotiator_name
                 if negotiator_name == self.game.player_party_name:
-                    self.open_coalition_window()
+                    self.switch_view(self.main_content_frame, self.coalition_view)
                 else:
                     self.game.handle_ai_coalition_turn()
+                    self.process_turn_logs() # Afficher ce que l'IA a fait
 
     def draw_timeline(self):
         """Dessine la barre de chronologie en bas."""
@@ -529,19 +453,19 @@ class GeoGameGUI:
         if clicked_turn < self.game.turn -1 and clicked_turn in self.turn_events:
             self.show_events_for_turn(clicked_turn)
 
-    def show_events_for_turn(self, turn_number, custom_logs=None):
+    def show_events_for_turn(self, turn_number, custom_logs=None, custom_title=None):
         """Affiche les événements pour un tour donné dans une fenêtre modale."""
         logs = custom_logs if custom_logs is not None else self.turn_events.get(turn_number, [])
         if not logs:
             self.hide_news_panel()
             return
 
-        self.news_title_var.set(f"Rapport - Semaine {turn_number + 1}")
+        title = custom_title if custom_title is not None else f"Rapport - Semaine {turn_number + 1}"
+        self.news_title_var.set(title)
         self.news_text.config(state="normal")
         self.news_text.delete("1.0", tk.END)
         self.news_text.insert(tk.END, "\n\n".join(logs))
         self.news_text.config(state="disabled", bg=self.colors["frame_bg"], fg=self.colors["text"])
-        
         self.news_panel.pack(side="left", fill="y", padx=(10,0), pady=10)
 
     def hide_news_panel(self):
@@ -553,6 +477,136 @@ class GeoGameGUI:
         frame = ttk.LabelFrame(parent, text=title, style="Card.TLabelframe")
         frame.pack(fill="both", expand=True, padx=20, pady=10)
         ttk.Label(frame, text="Contenu à venir...", font=("Segoe UI", 14, "italic")).pack(pady=50)
+
+    # --- Vues de Menu Principal ---
+
+    def show_main_menu(self, parent=None, title=""):
+        """Affiche le menu principal au démarrage."""
+        # Le parent est le main_content_frame
+        if not parent: parent = self.main_content_frame
+
+        for widget in parent.winfo_children():
+            widget.destroy()
+
+        self.power_view.pack_forget()
+        self.opposition_view.pack_forget()
+
+        self.control_panel.pack_forget() # Cacher le panneau de contrôle
+        frame = ttk.Frame(parent)
+        frame.pack(expand=True)
+
+        ttk.Label(frame, text="SimGeo", font=("Segoe UI", 32, "bold")).pack(pady=20)
+        ttk.Button(frame, text="Nouvelle Partie", command=lambda: self.switch_view(self.main_content_frame, self.new_game_view), style="Accent.TButton").pack(fill="x", pady=5)
+        ttk.Button(frame, text="Gérer les sauvegardes", command=lambda: self.switch_view(self.main_content_frame, self.manage_saves_view), style="Text.TButton").pack(fill="x", pady=5)
+        ttk.Button(frame, text="Options", command=lambda: self.switch_view(self.main_content_frame, self.options_view), style="Text.TButton").pack(fill="x", pady=5)
+        ttk.Button(frame, text="Quitter", command=self.quit_game, style="Text.TButton").pack(fill="x", pady=5)
+
+    def new_game_view(self, parent, title=""):
+        """Vue pour choisir le parti et démarrer une nouvelle partie."""
+        frame = ttk.LabelFrame(parent, text="Nouvelle Partie", style="Card.TLabelframe")
+        frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        ttk.Label(frame, text="Choisissez votre parti pour commencer", font=("Segoe UI", 14, "bold")).pack(pady=10)
+
+        from game_data import FRENCH_PARTIES
+        listbox, get_selected = self.create_filterable_list(frame, [p.name for p in FRENCH_PARTIES])
+
+        def on_choice_made():
+            chosen_party = get_selected() or "Renaissance"
+            self.game.start_new_game(chosen_party)
+
+            self.process_turn_logs()
+            self.update_status() # Ceci va maintenant packer la vue de jeu dans un conteneur vide
+            self.update_countries_info()
+
+        ttk.Button(frame, text="Commencer la partie", command=on_choice_made, style="Accent.TButton").pack(pady=10)
+        ttk.Button(frame, text="Retour", command=self.show_main_menu).pack(pady=5)
+
+    def manage_saves_view(self, parent, title=""):
+        """Vue pour sauvegarder, charger et supprimer des parties."""
+        frame = ttk.LabelFrame(parent, text="Gérer les Sauvegardes", style="Card.TLabelframe")
+        frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        # --- Section Sauvegarder ---
+        save_frame = ttk.Frame(frame)
+        save_frame.pack(fill="x", pady=10)
+        ttk.Label(save_frame, text="Nom de la sauvegarde :").pack(side="left", padx=5)
+        save_name_var = tk.StringVar()
+        save_entry = ttk.Entry(save_frame, textvariable=save_name_var)
+        save_entry.pack(side="left", fill="x", expand=True, padx=5)
+        
+        def do_save():
+            name = save_name_var.get()
+            if name and self.game.player_country:
+                self.game.save_game_by_name(name)
+                self.show_notification(self.game.get_and_clear_log()[-1], "Sauvegarde")
+                # Rafraîchir la liste
+                self.switch_view(parent, self.manage_saves_view, title)
+            else:
+                self.show_notification("Nom de sauvegarde invalide ou partie non démarrée.", "Erreur")
+
+        ttk.Button(save_frame, text="Sauvegarder", command=do_save, style="Accent.TButton").pack(side="left", padx=5)
+
+        # --- Section Charger/Supprimer ---
+        saves = list_saves()
+        if not saves:
+            ttk.Label(frame, text="Aucune sauvegarde disponible.").pack(pady=10)
+        else:
+            listbox, get_selected = self.create_filterable_list(frame, saves)
+            
+            btn_frame = ttk.Frame(frame)
+            btn_frame.pack(pady=10)
+
+            def do_load():
+                name = get_selected()
+                if name and self.game.load_game_by_name(name):
+                    self.process_turn_logs()
+                    self.update_status()
+                    self.update_countries_info()
+                else:
+                    self.show_notification(f"Chargement annulé ou sauvegarde '{name}' introuvable.", "Erreur")
+
+            def do_delete():
+                name = get_selected()
+                if name and delete_save(name):
+                    self.show_notification(f"Sauvegarde '{name}' supprimée.", "Succès")
+                    self.switch_view(parent, self.manage_saves_view, title) # Rafraîchir
+                else:
+                    self.show_notification(f"Impossible de supprimer '{name}'.", "Erreur")
+
+            ttk.Button(btn_frame, text="Charger la sélection", command=do_load).pack(side="left", padx=5)
+            ttk.Button(btn_frame, text="Supprimer la sélection", command=do_delete).pack(side="left", padx=5)
+
+        ttk.Button(frame, text="Retour", command=self.show_main_menu).pack(pady=20)
+
+    def options_view(self, parent, title=""):
+        """Vue pour les options du jeu."""
+        # Crée un overlay semi-transparent
+        overlay = ttk.Frame(self.root, style="Overlay.TFrame")
+        overlay.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # Crée le cadre des options au centre
+        frame = ttk.LabelFrame(overlay, text="Options", style="Card.TLabelframe")
+        frame.place(relx=0.5, rely=0.5, anchor="center", width=300, height=300)
+
+        def close_options():
+            overlay.destroy() # Détruit l'overlay
+            self.update_status() # Redessine l'interface de jeu en dessous
+
+        # Bouton de fermeture
+        close_button = ttk.Button(frame, text="✖", command=close_options, style="Text.TButton")
+        close_button.place(relx=1.0, rely=0, anchor="ne", x=-5, y=5)
+
+        def toggle_theme():
+            self.set_theme("dark" if self.colors == self.LIGHT_THEME else "light")
+
+        # Conteneur pour les boutons pour les centrer
+        button_container = ttk.Frame(frame, style="Card.TLabelframe")
+        button_container.place(relx=0.5, rely=0.5, anchor="center")
+
+        ttk.Button(button_container, text="🌗 Changer de thème", command=toggle_theme, style="Text.TButton").pack(fill="x", pady=5, padx=20)
+        ttk.Button(button_container, text="Retour au menu principal", command=lambda: [close_options(), self.show_main_menu()]).pack(fill="x", pady=5, padx=20)
+        ttk.Button(button_container, text="🚪 Quitter le jeu", command=self.quit_game, style="Accent.TButton").pack(fill="x", pady=20, padx=20)
 
     # --- Vues de Catégories (Pouvoir) ---
 
@@ -769,7 +823,7 @@ class GeoGameGUI:
         create_progress_bar(overview_frame, "Crédibilité", player_party.credibility, 2)
         create_progress_bar(overview_frame, "Cohésion", player_party.cohesion, 3)
 
-        # --- Section Finances du Parti ---
+        # --- Section Finances du Parti --- (Simplifié pour l'exemple)
         finance_frame = ttk.LabelFrame(parent, text="💰 Finances & Adhérents", style="Card.TLabelframe")
         finance_frame.pack(fill="x", padx=20, pady=10)
 
@@ -783,32 +837,33 @@ class GeoGameGUI:
 
         def apply_fee():
             # ... (la fonction apply_fee reste la même)
-            pass
+            try:
+                new_fee = float(fee_var.get())
+                if self.game.player_adjust_membership_fee(new_fee):
+                    self.show_notification(self.game.get_and_clear_log()[-1], "Finances du Parti")
+            except ValueError:
+                self.show_notification("Veuillez entrer un montant numérique valide.", "Erreur")
         ttk.Button(fee_frame, text="Appliquer", command=apply_fee).pack(side="left")
 
-    def open_coalition_window(self):
-        """Ouvre la fenêtre de négociation de coalition."""
+    def coalition_view(self, parent, title=""):
+        """Vue pour la négociation de coalition, remplace la fenêtre modale."""
         self.coalition_partner_vars = {} # Stocker les variables ici pour éviter le garbage collection
-        coalition_window = tk.Toplevel(self.root)
-        coalition_window.title("Négociations de Coalition")
-        coalition_window.geometry("500x550")
-        coalition_window.transient(self.root)
-        coalition_window.grab_set()
+        
+        frame = ttk.Frame(parent)
+        frame.pack(fill="both", expand=True)
 
-        ttk.Label(coalition_window, text="Aucune majorité absolue !", font=("Segoe UI", 16, "bold")).pack(pady=10)
-        ttk.Label(coalition_window, text=f"C'est à votre tour ({self.game.player_party_name}) de tenter de former un gouvernement.", font=("Segoe UI", 11)).pack(pady=5)
+        ttk.Label(frame, text="Aucune majorité absolue !", font=("Segoe UI", 16, "bold")).pack(pady=10)
+        ttk.Label(frame, text=f"C'est à votre tour ({self.game.player_party_name}) de tenter de former un gouvernement.", font=("Segoe UI", 11)).pack(pady=5)
 
-        seats_frame = ttk.LabelFrame(coalition_window, text="Résultats des élections", style="Card.TLabelframe")
+        seats_frame = ttk.LabelFrame(frame, text="Résultats des élections", style="Card.TLabelframe")
         seats_frame.pack(fill="x", padx=20, pady=10)
 
-        partners_frame = ttk.LabelFrame(coalition_window, text="Choisir des partenaires", style="Card.TLabelframe")
+        partners_frame = ttk.LabelFrame(frame, text="Choisir des partenaires", style="Card.TLabelframe")
         partners_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # Afficher les sièges
         for party, seats in sorted(self.france.parliament.seats_distribution.items(), key=lambda item: item[1], reverse=True):
             ttk.Label(seats_frame, text=f"{party}: {seats} sièges").pack(anchor="w", padx=10)
 
-        # Liste des partenaires potentiels
         for party in self.france.political_parties:
             if party.name != self.game.player_party_name:
                 var = tk.BooleanVar()
@@ -816,22 +871,16 @@ class GeoGameGUI:
                 chk.pack(anchor="w", padx=10)
                 self.coalition_partner_vars[party.name] = var
 
-        # Affichage du total de la coalition
         total_seats_var = tk.StringVar(value=f"Total de la coalition : {self.france.parliament.seats_distribution.get(self.game.player_party_name, 0)} sièges")
-        total_seats_label = ttk.Label(coalition_window, textvariable=total_seats_var, font=("Segoe UI", 12, "bold"))
+        total_seats_label = ttk.Label(frame, textvariable=total_seats_var, font=("Segoe UI", 12, "bold"))
         total_seats_label.pack(pady=10)
 
         def update_total_seats(*args):
             total = self.france.parliament.seats_distribution.get(self.game.player_party_name, 0)
             for name, var in self.coalition_partner_vars.items():
-                if var.get():
-                    total += self.france.parliament.seats_distribution.get(name, 0)
-            
+                if var.get(): total += self.france.parliament.seats_distribution.get(name, 0)
             total_seats_var.set(f"Total de la coalition : {total} sièges")
-            if total >= 289:
-                total_seats_label.config(foreground="green")
-            else:
-                total_seats_label.config(foreground="red")
+            total_seats_label.config(foreground="green" if total >= 289 else "red")
 
         for var in self.coalition_partner_vars.values():
             var.trace_add("write", update_total_seats)
@@ -840,22 +889,17 @@ class GeoGameGUI:
             selected_partners = [name for name, var in self.coalition_partner_vars.items() if var.get()]
             success = self.game.player_attempt_coalition(selected_partners)
             self.process_turn_logs()
-            self.update_status()
-            coalition_window.destroy()
+            self.update_status() # Ceci va changer la vue si le jeu n'est plus en négo
 
         def concede():
             self.game.player_concede_power()
             self.process_turn_logs()
-            self.update_status()
-            coalition_window.destroy()
+            self.update_status() # Ceci va changer la vue
 
-        btn_frame = ttk.Frame(coalition_window)
+        btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=10)
         ttk.Button(btn_frame, text="Tenter de former le gouvernement", command=attempt_formation, style="Accent.TButton").pack(side="left", padx=10)
         ttk.Button(btn_frame, text="Aller dans l'opposition", command=concede).pack(side="left", padx=10)
-
-        # Cette ligne est cruciale : elle rend la fenêtre modale et attend sa fermeture.
-        coalition_window.wait_window()
 
     def switch_view(self, parent_frame, view_function, title=""):
         """Affiche une vue dans le panneau de contenu spécifié."""
@@ -976,8 +1020,8 @@ class GeoGameGUI:
 
     def break_treaty_ui(self, parent, title=""):
         """Fenêtre pour rompre un traité"""
-        if not self.alliances:
-            messagebox.showinfo("Info", "Aucun traité à rompre.")
+        if not any(a.active and self.france.name in a.members for a in self.alliances):
+            self.show_notification("Aucun traité actif à rompre.", "Info")
             return
         frame = ttk.LabelFrame(parent, text=title, style="Card.TLabelframe")
         frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -989,18 +1033,18 @@ class GeoGameGUI:
         def do_break():
             val = combo.get()
             if not val:
-                messagebox.showinfo("Info", "Aucun traité sélectionné.")
+                self.show_notification("Aucun traité sélectionné.", "Info")
                 return
             try:
                 aid_i = int(val.split(" - ")[0])
             except Exception:
-                self.log("ID de traité invalide.")
+                self.show_notification("ID de traité invalide.", "Erreur")
                 return
             ok = dissolve_alliance(self.alliances, aid_i)
             if ok:
-                messagebox.showinfo("Succès", "Le traité a été rompu.")
+                self.show_notification("Le traité a été rompu.", "Succès")
             else:
-                messagebox.showerror("Erreur", "Aucun traité avec cet ID trouvé.")
+                self.show_notification("Aucun traité avec cet ID trouvé.", "Erreur")
             self.update_status()
         ttk.Button(frame, text="Rompre le traité", command=do_break, style="Accent.TButton").pack(pady=10)
 
@@ -1054,6 +1098,7 @@ class GeoGameGUI:
 
             fig = Figure(figsize=(8, 2), dpi=80)
             fig.patch.set_facecolor(self.colors["frame_bg"])
+            fig.subplots_adjust(left=0.15, bottom=0.2) # Ajuster pour les labels
             ax = fig.add_subplot(111)
 
             history_slice = slice(-52, None)
@@ -1067,10 +1112,20 @@ class GeoGameGUI:
             ax.spines['right'].set_visible(False)
             ax.spines['bottom'].set_color(self.colors["border"])
             ax.spines['left'].set_color(self.colors["border"])
-            ax.tick_params(axis='x', colors=self.colors["text"], bottom=False, labelbottom=False)
-            ax.tick_params(axis='y', colors=self.colors["text"], left=True, labelleft=True)
-            ax.set_title(f"{title}: {plot_data[-1]:.2f}{unit}", loc='left', color=self.colors["text"], fontsize=12, fontweight='bold')
             
+            # Configurer l'axe X avec des dates
+            num_ticks = 5
+            tick_indices = [int(i * (len(plot_data)-1) / (num_ticks-1)) for i in range(num_ticks)]
+            tick_turns = [self.game.turn - len(plot_data) + i for i in tick_indices]
+            tick_dates = [(self.game.start_date + timedelta(weeks=t)).strftime('%m-%Y') for t in tick_turns]
+            ax.set_xticks(tick_indices)
+            ax.set_xticklabels(tick_dates, rotation=0, ha='center')
+
+            ax.tick_params(axis='x', colors=self.colors["text"], bottom=True, labelbottom=True)
+            ax.tick_params(axis='y', colors=self.colors["text"], left=True, labelleft=True)
+            ax.set_ylabel(unit, color=self.colors["text"])
+            ax.set_title(f"{title}: {plot_data[-1]:.2f}{unit}", loc='left', color=self.colors["text"], fontsize=12, fontweight='bold')
+
             fig.tight_layout(pad=0.5)
             canvas_widget = FigureCanvasTkAgg(fig, master=graph_frame)
             canvas_widget.draw()
@@ -1078,12 +1133,12 @@ class GeoGameGUI:
 
         # --- Création de tous les graphiques ---
         create_mini_graph(scrollable_frame, "PIB", self.gdp_history, "#34568B", " Md€")
-        create_mini_graph(scrollable_frame, "Opinion Publique", [v*100 for v in self.approval_history], "#28a745", "%")
+        create_mini_graph(scrollable_frame, "Opinion Publique", [v*100 for v in self.approval_history], "#28a745", " %")
         create_mini_graph(scrollable_frame, "Trésor", self.treasury_history, "#17a2b8", " Md€")
         create_mini_graph(scrollable_frame, "Dette Publique", self.debt_history, "#dc3545", " Md€")
-        create_mini_graph(scrollable_frame, "Chômage", [v*100 for v in self.unemployment_history], "#ffc107", "%")
-        create_mini_graph(scrollable_frame, "Inflation", [v*100 for v in self.inflation_history], "#fd7e14", "%")
-        create_mini_graph(scrollable_frame, "Croissance", [v*100 for v in self.growth_history], "#6f42c1", "%")
+        create_mini_graph(scrollable_frame, "Chômage", [v*100 for v in self.unemployment_history], "#ffc107", " %")
+        create_mini_graph(scrollable_frame, "Inflation", [v*100 for v in self.inflation_history], "#fd7e14", " %")
+        create_mini_graph(scrollable_frame, "Croissance", [v*100 for v in self.growth_history], "#6f42c1", " %")
 
     def campaign_menu_ui(self, parent, title=""):
         """Interface pour gérer la campagne électorale."""
@@ -1151,31 +1206,30 @@ class GeoGameGUI:
             def do_apply():
                 val = combo_law.get()
                 if not val:
-                    messagebox.showinfo("Info", "Sélectionnez une loi.")
+                    self.show_notification("Sélectionnez une loi.", "Info")
                     return
                 law_id = int(val.split(" - ")[0]) # type: ignore
                 law = next((l for l in laws if l.id == law_id), None)
                 if law and law not in self.france.laws:
                     if simulate_parliament_vote(self.france, law):
                         apply_law_to_country(self.france, law_id)
-                        messagebox.showinfo("Vote Réussi", f"La loi '{law.name}' a été adoptée par le parlement !")
+                        self.show_notification(f"La loi '{law.name}' a été adoptée par le parlement !", "Vote Réussi")
                     else:
-                        messagebox.showwarning("Vote Échoué", f"La loi '{law.name}' a été rejetée par le parlement.")
-                    # Revenir au tableau de bord
+                        self.show_notification(f"La loi '{law.name}' a été rejetée par le parlement.", "Vote Échoué")
                 else:
-                    messagebox.showinfo("Info", "Loi déjà appliquée ou introuvable.")
+                    self.show_notification("Loi déjà appliquée ou introuvable.", "Info")
 
             def do_remove():
                 val = combo_law.get()
                 if not val:
-                    messagebox.showinfo("Info", "Sélectionnez une loi.")
+                    self.show_notification("Sélectionnez une loi.", "Info")
                     return
                 law_id = int(val.split(" - ")[0]) # type: ignore
                 if remove_law_from_country(self.france, law_id):
-                    messagebox.showinfo("Info", "Loi retirée.")
+                    self.show_notification("Loi retirée.", "Info")
                     # Revenir au tableau de bord
                 else:
-                    messagebox.showinfo("Info", "Loi non appliquée ou introuvable.")
+                    self.show_notification("Loi non appliquée ou introuvable.", "Info")
 
             btns = ttk.Frame(laws_frame)
             btns.pack(fill="x", pady=8)
@@ -1228,14 +1282,13 @@ class GeoGameGUI:
         
         cost = 5
         if self.france.treasury < cost:
-            messagebox.showwarning("Fonds insuffisants", f"Vous n'avez pas assez d'argent pour commander un sondage (coût : {cost} Md€).")
+            self.show_notification(f"Vous n'avez pas assez d'argent pour commander un sondage (coût : {cost} Md€).", "Fonds insuffisants")
             return
 
         self.france.treasury -= cost
-        messagebox.showinfo("Sondage", f"📊 Un sondage a été commandé pour {cost} Md€.")
-        # Affiche les résultats dans une nouvelle fenêtre pour un impact plus fort
+        self.show_notification(f"📊 Un sondage a été commandé pour {cost} Md€.", "Sondage")
+        # Rafraîchit la vue pour afficher les nouveaux sondages
         self.politics_menu_ui(parent)
-        messagebox.showinfo("Résultats du Sondage", "Les nouvelles intentions de vote sont affichées.")
         
     def tax_modification_ui(self, parent, title=""):
         """Fenêtre pour modifier les impôts avec des zones de texte."""
@@ -1289,7 +1342,7 @@ class GeoGameGUI:
                 self.update_status()
                 # Revenir au tableau de bord
             except ValueError as e:
-                messagebox.showerror("Erreur de saisie", f"Valeur invalide : {e}\nVeuillez entrer un nombre correct pour les impôts.")
+                self.show_notification(f"Valeur invalide : {e}\nVeuillez entrer un nombre correct pour les impôts.", "Erreur de saisie")
     
         ttk.Button(frame, text="Appliquer les changements", command=do_apply, style="Accent.TButton").pack(pady=10)
 
@@ -1314,7 +1367,7 @@ class GeoGameGUI:
             if self.france.name in [war.attacker_leader, war.defender_leader] + war.attacker_allies + war.defender_allies:
                 def propose_peace(war_id=war.id):
                     # Logique de paix à implémenter
-                    messagebox.showinfo("Paix", f"🕊️ Une proposition de paix a été envoyée pour le conflit (ID {war_id}).")
+                    self.show_notification(f"🕊️ Une proposition de paix a été envoyée pour le conflit (ID {war_id}).", "Paix")
                 ttk.Button(war_frame, text="Proposer la paix (50 Md€)", command=propose_peace).pack(pady=5)
 
     def create_filterable_list(self, parent, items):
@@ -1383,6 +1436,10 @@ class GeoGameGUI:
         style.configure("Info.TLabel", background=self.colors["bg"], foreground=self.colors["text"])
 
         # Style pour le Treeview
+        style.configure("Overlay.TFrame", background=self.colors["bg"])
+        # Pour la transparence, on doit utiliser les capacités du window manager
+        self.root.attributes("-alpha", 1.0) # Valeur de base
+
         style.configure("Custom.Treeview", background=self.colors["frame_bg"], foreground=self.colors["text"], fieldbackground=self.colors["frame_bg"])
         style.configure("Custom.Treeview.Heading", background=self.colors["bg"], foreground=self.colors["text"], font=("Segoe UI", 11, "bold"))
         style.map("Custom.Treeview.Heading", background=[('active', self.colors["frame_bg"])])
