@@ -16,6 +16,7 @@ from war_system import start_war, simulate_war_turn
 from event_system import trigger_event, trigger_political_event
 from ai_system import ai_take_turn, ai_opposition_turn
 
+MAX_COALITION_ATTEMPTS = 3
 
 class Game:
     """
@@ -33,7 +34,7 @@ class Game:
         self.player_party_name: str = "Renaissance"
         self.player_is_in_power: bool = True
         self.approval_history: list = []
-        self.game_state: str = "RUNNING" # "RUNNING", "COALITION_NEGOTIATION"
+        self.game_state: str = "RUNNING" # "RUNNING", "COALITION_NEGOTIATION", "GAME_OVER"
         self.gdp_history: list = []
         self.treasury_history: list = []
         self.inflation_history: list = []
@@ -43,6 +44,8 @@ class Game:
         self.log_messages: List[str] = []
         self.next_election_turn: int = 260 # 5 ans * 52 semaines
         self.campaign_period: int = 26 # 26 semaines = 6 mois
+        self.coalition_negotiator_rank: int = 0 # 0 = 1er parti, 1 = 2e, etc.
+        self.negotiating_party_name: Optional[str] = None
 
     def start_new_game(self, chosen_party_name: str = "Renaissance"):
         """Initialise une nouvelle partie."""
@@ -142,6 +145,7 @@ class Game:
             if winner_seats < self.player_country.parliament.total_seats / 2:
                 self.log("\nAucun parti n'a la majorité absolue. Début des négociations de coalition...")
                 self.game_state = "COALITION_NEGOTIATION"
+                self.coalition_negotiator_rank = 0
                 # Le jeu est en pause, la GUI doit ouvrir la fenêtre de négociation
             else:
                 self.player_is_in_power = player_won
@@ -505,8 +509,33 @@ class Game:
         if self.game_state != "COALITION_NEGOTIATION" or not self.player_country:
             return
         if not from_negotiation_failure:
-            self.log("Vous avez choisi de ne pas former de gouvernement et d'entrer dans l'opposition.")
-        _, coal_log = form_coalition(self.player_country, self.player_party_name, player_conceded=True)
-        self.log(coal_log)
-        self.player_is_in_power = False
-        self.game_state = "RUNNING"
+            self.log(f"Le parti '{self.negotiating_party_name}' a choisi de ne pas former de gouvernement.")
+        
+        self.coalition_negotiator_rank += 1
+
+        if self.coalition_negotiator_rank >= MAX_COALITION_ATTEMPTS:
+            self.log("Aucun parti n'a réussi à former un gouvernement. De nouvelles élections sont organisées !")
+            self.next_election_turn = self.turn + 13 # Nouvelles élections dans 3 mois
+            self.game_state = "RUNNING"
+        else:
+            self.log(f"La main passe au parti suivant pour tenter de former une coalition.")
+            self.game_state = "COALITION_NEGOTIATION" # Reste dans cet état pour le prochain parti
+
+    def handle_ai_coalition_turn(self):
+        """Gère la tentative de formation de coalition par l'IA."""
+        if self.game_state != "COALITION_NEGOTIATION" or not self.player_country or self.negotiating_party_name == self.player_party_name:
+            return
+
+        # Logique simplifiée pour l'IA
+        self.log(f"L'IA du parti '{self.negotiating_party_name}' tente de former un gouvernement...")
+        
+        # L'IA échoue dans 30% des cas pour rendre le jeu intéressant
+        if random.random() < 0.3:
+            self.log(f"Échec des négociations pour '{self.negotiating_party_name}'.")
+            self.player_concede_power(from_negotiation_failure=True)
+        else:
+            # L'IA réussit et forme un gouvernement seule ou avec des alliés fictifs
+            self.log(f"'{self.negotiating_party_name}' a réussi à former un gouvernement.")
+            self.player_country.leader_party = self.negotiating_party_name
+            self.player_is_in_power = False
+            self.game_state = "RUNNING"

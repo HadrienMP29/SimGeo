@@ -63,23 +63,43 @@ class GeoGameGUI:
         self.status_label = ttk.Label(root, textvariable=self.status_var, style="Info.TLabel")
         self.status_label.pack(pady=(0, 15), fill="x", padx=10)
         
-        # --- Conteneur principal qui affichera la vue "pouvoir" ou "opposition" ---
-        self.main_content_frame = ttk.Frame(root)
-        self.main_content_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # --- Conteneur pour le panneau de news et le contenu principal ---
+        side_by_side_container = ttk.Frame(root)
+        side_by_side_container.pack(fill="both", expand=True)
 
-        # --- Création des deux vues principales ---
+        # --- Panneau d'événements (initialement caché) ---
+        self.news_panel = ttk.Frame(side_by_side_container, width=350, style="Card.TLabelframe")
+        self.news_title_var = tk.StringVar()
+        news_header = ttk.Frame(self.news_panel, style="Card.TLabelframe")
+        news_header.pack(fill="x", pady=(0,5))
+        ttk.Label(news_header, textvariable=self.news_title_var, font=("Segoe UI", 14, "bold")).pack(side="left", padx=10, pady=5)
+        ttk.Button(news_header, text="✖", command=self.hide_news_panel, style="Text.TButton").pack(side="right", padx=5)
+        self.news_text = tk.Text(self.news_panel, wrap="word", font=("Segoe UI", 11), relief="flat", borderwidth=0)
+        self.news_text.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # --- Conteneur principal qui affichera la vue "pouvoir" ou "opposition" ---
+        self.main_content_frame = ttk.Frame(side_by_side_container)
+        self.main_content_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
 
         # --- Panneau de contrôle (boutons communs) ---
         control_panel = ttk.Frame(root, style="Card.TLabelframe")
         control_panel.pack(side="bottom", fill="x", padx=10, pady=5)
+        
+        # --- Nouvelle barre de chronologie ---
+        self.timeline_canvas = tk.Canvas(control_panel, height=40, bg=self.colors["frame_bg"], highlightthickness=0)
+        self.timeline_canvas.pack(side="left", fill="x", expand=True, padx=10, pady=5)
+        self.timeline_canvas.bind("<Button-1>", self.on_timeline_click)
+        self.timeline_canvas.bind("<Configure>", lambda e: self.draw_timeline())
 
-        self.log_text = tk.Text(control_panel, height=4, wrap="word", font=("Consolas", 10), relief="flat", borderwidth=0, padx=10, pady=10)
-        self.log_text.pack(side="left", fill="x", expand=True, padx=10)
         ttk.Button(control_panel, text="➡️ Tour Suivant", command=self.next_turn, style="Accent.TButton").pack(side="right", fill="y", padx=8, pady=4)
 
         # --- Vues principales (pouvoir/opposition) ---
         self.power_view = ttk.Frame(self.main_content_frame)
         self.opposition_view = ttk.Frame(self.main_content_frame)
+
+        # --- Données pour la timeline ---
+        self.turn_events = {}
+
         # --- Contenu des onglets ---
         self.setup_government_tab()
         self.setup_opposition_tab()
@@ -87,11 +107,13 @@ class GeoGameGUI:
 
         # Lancer la première mise à jour
         self.new_game()
+        
+        # Raccourci clavier pour le tour suivant
+        self.root.bind("<space>", lambda event: self.next_turn())
 
     def log(self, message):
-        """Ajoute un message au journal"""
-        self.log_text.insert(tk.END, f"{message}\n\n")
-        self.log_text.see(tk.END)
+        """Obsolète, les messages sont maintenant gérés par tour."""
+        pass
 
     def update_status(self):
         """Met à jour la barre de statut et rafraîchit la diplomatie si ouverte"""
@@ -159,7 +181,7 @@ class GeoGameGUI:
             chosen_party = listbox.get(selected_indices[0]) if selected_indices else "Renaissance"
             party_choice_window.destroy()
             self.game.start_new_game(chosen_party)
-            for msg in self.game.get_and_clear_log(): self.log(msg)
+            self.process_turn_logs()
             self.update_status()
             self.update_countries_info()
 
@@ -168,7 +190,7 @@ class GeoGameGUI:
     def load_game(self):
         """Charge une sauvegarde"""
         if self.game.load_game():
-            self.log("📂 Partie chargée.")
+            self.show_events_for_turn(self.game.turn -1, ["📂 Partie chargée."])
             self.update_status()
         else:
             messagebox.showinfo("Info", "Aucune sauvegarde trouvée.")
@@ -180,7 +202,7 @@ class GeoGameGUI:
         if name:
             if name and self.game.player_country:
                 self.game.save_game_by_name(name)
-                self.log(self.game.get_and_clear_log()[-1]) # Affiche le dernier message du log
+                self.show_events_for_turn(self.game.turn -1, self.game.get_and_clear_log())
             else:
                 self.log("Sauvegarde annulée ou nom invalide.")
 
@@ -194,11 +216,11 @@ class GeoGameGUI:
         name = tk.simpledialog.askstring("Charger", f"Sauvegardes disponibles: {', '.join(saves)}\n\nEntrez un nom:", parent=self.root) # type: ignore
         if name and name in saves:
             if self.game.load_game_by_name(name):
-                self.log(self.game.get_and_clear_log()[-1])
+                self.process_turn_logs()
                 self.update_status()
                 self.update_countries_info()
         else:
-            self.log(f"Chargement annulé ou sauvegarde '{name}' introuvable.")
+            messagebox.showwarning("Erreur", f"Chargement annulé ou sauvegarde '{name}' introuvable.")
 
     def update_countries_info(self):
         """Met à jour le tableau d'informations des pays."""
@@ -225,9 +247,9 @@ class GeoGameGUI:
         name = tk.simpledialog.askstring("Supprimer", f"Sauvegardes disponibles: {', '.join(list_saves())}\n\nEntrez un nom:", parent=self.root) # type: ignore
         if name:
             if delete_save(name):
-                self.log(f"Sauvegarde '{name}' supprimée.")
+                messagebox.showinfo("Succès", f"Sauvegarde '{name}' supprimée.")
             else:
-                self.log(f"❌ Impossible de supprimer '{name}'.")
+                messagebox.showerror("Erreur", f"Impossible de supprimer '{name}'.")
 
     def sort_treeview(self, col, reverse):
         """Trie le Treeview par colonne."""
@@ -284,6 +306,7 @@ class GeoGameGUI:
             "Technologie 💡": self.placeholder_view,
             "Mon parti": self.my_party_view,
             "Infos Monde 📈": self.world_info_ui,
+            "Assemblée 🏛️": self.hemicycle_view,
         }
 
         for text, command in categories.items():
@@ -312,6 +335,7 @@ class GeoGameGUI:
             "Influence": self.placeholder_view, # À implémenter
             "Élections": self.placeholder_view, # À implémenter
             "Mon parti": self.my_party_view,
+            "Assemblée 🏛️": self.hemicycle_view,
         }
 
         for text, command in categories.items():
@@ -428,11 +452,17 @@ class GeoGameGUI:
         if not self.world:
             return        
         self.game.next_turn()
-        for msg in self.game.get_and_clear_log():
-            self.log(msg)
+        self.process_turn_logs()
         self.update_status()
         self.update_countries_info()
+        self.draw_timeline()
         self.check_game_state()
+
+    def process_turn_logs(self):
+        """Récupère les logs du tour, les stocke et les affiche."""
+        logs = self.game.get_and_clear_log()
+        self.turn_events[self.game.turn - 1] = logs
+        self.show_events_for_turn(self.game.turn - 1)
 
     def quit_game(self):
         """Quitte le jeu."""
@@ -443,9 +473,81 @@ class GeoGameGUI:
 
     def check_game_state(self):
         """Vérifie l'état du jeu et déclenche les UI appropriées (ex: coalition)."""
-        if self.game.game_state == "COALITION_NEGOTIATION":
-            self.open_coalition_window()
+        if self.game.game_state == "COALITION_NEGOTIATION" and self.france:
+            sorted_parties = sorted(self.france.parliament.seats_distribution.items(), key=lambda item: item[1], reverse=True)
+            
+            if self.game.coalition_negotiator_rank < len(sorted_parties):
+                negotiator_name = sorted_parties[self.game.coalition_negotiator_rank][0]
+                self.game.negotiating_party_name = negotiator_name
+                if negotiator_name == self.game.player_party_name:
+                    self.open_coalition_window()
+                else:
+                    self.game.handle_ai_coalition_turn()
 
+    def draw_timeline(self):
+        """Dessine la barre de chronologie en bas."""
+        canvas = self.timeline_canvas
+        canvas.delete("all")
+        width = canvas.winfo_width()
+        height = canvas.winfo_height()
+        
+        if width < 2 or not hasattr(self.game, 'turn'): return
+
+        num_weeks_to_show = 20
+        week_width = width / num_weeks_to_show
+        start_turn = max(0, self.game.turn - 3) # Commence un peu avant le tour actuel
+
+        for i in range(num_weeks_to_show):
+            turn = start_turn + i
+            x0 = i * week_width
+            x1 = (i + 1) * week_width
+            
+            is_current_turn = (turn == self.game.turn)
+            is_past_turn = (turn < self.game.turn -1)
+
+            color = self.colors["frame_bg"]
+            outline_color = self.colors["border"]
+            if is_current_turn:
+                color = self.colors["accent"]
+                outline_color = self.colors["accent_hover"]
+            elif is_past_turn:
+                color = self.colors["bg"]
+
+            canvas.create_rectangle(x0, 2, x1, height - 2, fill=color, outline=outline_color, width=2)
+            canvas.create_text(x0 + week_width/2, height/2, text=f"S{turn+1}", fill=self.colors["text"])
+
+    def on_timeline_click(self, event):
+        """Gère le clic sur la chronologie."""
+        width = self.timeline_canvas.winfo_width()
+        num_weeks_to_show = 20
+        week_width = width / num_weeks_to_show
+        start_turn = max(0, self.game.turn - 3)
+
+        clicked_index = int(event.x // week_width)
+        clicked_turn = start_turn + clicked_index
+
+        if clicked_turn < self.game.turn -1 and clicked_turn in self.turn_events:
+            self.show_events_for_turn(clicked_turn)
+
+    def show_events_for_turn(self, turn_number, custom_logs=None):
+        """Affiche les événements pour un tour donné dans une fenêtre modale."""
+        logs = custom_logs if custom_logs is not None else self.turn_events.get(turn_number, [])
+        if not logs:
+            self.hide_news_panel()
+            return
+
+        self.news_title_var.set(f"Rapport - Semaine {turn_number + 1}")
+        self.news_text.config(state="normal")
+        self.news_text.delete("1.0", tk.END)
+        self.news_text.insert(tk.END, "\n\n".join(logs))
+        self.news_text.config(state="disabled", bg=self.colors["frame_bg"], fg=self.colors["text"])
+        
+        self.news_panel.pack(side="left", fill="y", padx=(10,0), pady=10)
+
+    def hide_news_panel(self):
+        """Cache le panneau des nouvelles."""
+        self.news_panel.pack_forget()
+        
     def placeholder_view(self, parent, title=""):
         """Vue temporaire pour les catégories non implémentées."""
         frame = ttk.LabelFrame(parent, text=title, style="Card.TLabelframe")
@@ -564,6 +666,66 @@ class GeoGameGUI:
         frame.pack(fill="both", expand=True, padx=20, pady=10)
         self.create_opposition_actions(frame) # Fonction helper pour créer les boutons
 
+    def hemicycle_view(self, parent, title=""):
+        """Affiche la composition de l'Assemblée Nationale en hémicycle."""
+        frame = ttk.LabelFrame(parent, text="Composition de l'Assemblée Nationale", style="Card.TLabelframe")
+        frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        if not self.france:
+            ttk.Label(frame, text="Aucune donnée parlementaire disponible.").pack()
+            return
+
+        # Paned window to separate hemicycle and legend
+        pane = ttk.PanedWindow(frame, orient=tk.HORIZONTAL)
+        pane.pack(fill="both", expand=True, pady=10)
+
+        canvas_frame = ttk.Frame(pane)
+        pane.add(canvas_frame, weight=3)
+        
+        legend_frame = ttk.LabelFrame(pane, text="Légende", style="Card.TLabelframe")
+        pane.add(legend_frame, weight=1)
+
+        canvas = tk.Canvas(canvas_frame, bg=self.colors["bg"], highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
+
+        party_colors = {"Centre": "#ffc107", "Droite": "#007bff", "Extrême-droite": "#343a40", "Gauche": "#dc3545", "Extrême-gauche": "#8B0000", "Écologiste": "#28a745", "Divers": "#6c757d"}
+        
+        total_seats = self.france.parliament.total_seats
+        if total_seats == 0: return
+
+        start_angle = 0
+
+        # Définir l'ordre politique de gauche à droite
+        ideology_order = ["Extrême-gauche", "Gauche", "Écologiste", "Centre", "Droite", "Extrême-droite", "Divers"]
+
+        # Créer une liste de partis avec leur idéologie pour le tri
+        parties_with_ideology = []
+        for party_name, seats in self.france.parliament.seats_distribution.items():
+            party_ideology = next((p.ideology for p in self.france.political_parties if p.name == party_name), "Divers")
+            parties_with_ideology.append({'name': party_name, 'seats': seats, 'ideology': party_ideology})
+
+        # Trier les partis selon l'ordre de l'échiquier politique
+        sorted_parties_by_ideology = sorted(parties_with_ideology, key=lambda p: ideology_order.index(p['ideology']) if p['ideology'] in ideology_order else len(ideology_order))
+
+        for party_info in reversed(sorted_parties_by_ideology):
+            party_name = party_info['name']
+            seats = party_info['seats']
+            party_ideology = next((p.ideology for p in self.france.political_parties if p.name == party_name), "Divers")
+            color = party_colors.get(party_ideology, "#6c757d")
+            
+            # Dessiner la légende
+            legend_entry = ttk.Frame(legend_frame)
+            legend_entry.pack(fill="x", padx=10, pady=3)
+            ttk.Label(legend_entry, text="■", foreground=color, font=("Segoe UI", 14)).pack(side="left")
+            ttk.Label(legend_entry, text=f" {party_name}: {seats}").pack(side="left", anchor="w")
+
+            # Dessiner l'arc de l'hémicycle
+            extent = (seats / total_seats) * 180
+            canvas.create_arc(20, 20, 700, 700, start=start_angle, extent=extent, fill=color, outline=self.colors["border"], width=2)
+            start_angle += extent
+
+        ttk.Label(legend_frame, text=f"Majorité : {total_seats // 2 + 1} sièges", font=("Segoe UI", 10, "italic")).pack(pady=10)
+
     def world_info_ui(self, parent, title=""):
         """Fenêtre avec les infos de tous les pays"""
         frame = ttk.LabelFrame(parent, text=title, style="Card.TLabelframe")
@@ -634,7 +796,7 @@ class GeoGameGUI:
         coalition_window.grab_set()
 
         ttk.Label(coalition_window, text="Aucune majorité absolue !", font=("Segoe UI", 16, "bold")).pack(pady=10)
-        ttk.Label(coalition_window, text="Vous devez former une coalition pour gouverner.", font=("Segoe UI", 11)).pack(pady=5)
+        ttk.Label(coalition_window, text=f"C'est à votre tour ({self.game.player_party_name}) de tenter de former un gouvernement.", font=("Segoe UI", 11)).pack(pady=5)
 
         seats_frame = ttk.LabelFrame(coalition_window, text="Résultats des élections", style="Card.TLabelframe")
         seats_frame.pack(fill="x", padx=20, pady=10)
@@ -676,14 +838,14 @@ class GeoGameGUI:
 
         def attempt_formation():
             selected_partners = [name for name, var in self.coalition_partner_vars.items() if var.get()]
-            self.game.player_attempt_coalition(selected_partners)
-            for msg in self.game.get_and_clear_log(): self.log(msg)
+            success = self.game.player_attempt_coalition(selected_partners)
+            self.process_turn_logs()
             self.update_status()
             coalition_window.destroy()
 
         def concede():
             self.game.player_concede_power()
-            for msg in self.game.get_and_clear_log(): self.log(msg)
+            self.process_turn_logs()
             self.update_status()
             coalition_window.destroy()
 
@@ -711,8 +873,7 @@ class GeoGameGUI:
             btn_frame.pack(fill="x", pady=5, padx=10)
             def do_action():
                 action_func()
-                self.log(self.game.get_and_clear_log()[-1])
-                self.switch_view(self.opposition_content_frame, self.opposition_strategy_view, "Stratégie politique")
+                self.process_turn_logs()
             ttk.Button(btn_frame, text=text, command=do_action).pack(side="left", padx=10)
             ttk.Label(btn_frame, text=description).pack(side="left")
 
@@ -762,8 +923,7 @@ class GeoGameGUI:
                 return
             
             self.game.player_espionnage(target_country)
-            for msg in self.game.get_and_clear_log():
-                self.log(msg)
+            self.process_turn_logs()
             self.update_status()
             # Revenir au tableau de bord
         ttk.Button(frame, text="Lancer l'espionnage", command=do_espionnage, style="Accent.TButton").pack(pady=10)
@@ -786,8 +946,7 @@ class GeoGameGUI:
                 self.log("❌ Pays introuvable.")
             else:
                 self.game.player_declare_war(target_country)
-                for msg in self.game.get_and_clear_log(): self.log(msg)
-                self.update_status()
+                self.process_turn_logs()
             # Revenir au tableau de bord
         ttk.Button(frame, text="Déclarer la guerre", command=do_declare, style="Accent.TButton").pack(pady=10)
 
@@ -810,8 +969,7 @@ class GeoGameGUI:
                 self.log("❌ Type de traité ou pays invalide.")
             else:
                 self.game.player_propose_treaty(tt, target_country)
-                for msg in self.game.get_and_clear_log():
-                    self.log(msg)
+                self.process_turn_logs()
                 self.update_status()
             # Revenir au tableau de bord
         ttk.Button(frame, text="Proposer le traité", command=do_propose, style="Accent.TButton").pack(pady=10)
@@ -840,11 +998,10 @@ class GeoGameGUI:
                 return
             ok = dissolve_alliance(self.alliances, aid_i)
             if ok:
-                self.log("Traité rompu (il sera marqué inactif).")
+                messagebox.showinfo("Succès", "Le traité a été rompu.")
             else:
-                self.log("Aucun traité avec cet ID.")
+                messagebox.showerror("Erreur", "Aucun traité avec cet ID trouvé.")
             self.update_status()
-            # Revenir au tableau de bord
         ttk.Button(frame, text="Rompre le traité", command=do_break, style="Accent.TButton").pack(pady=10)
 
     def send_diplomatic_mission_ui(self, parent, title=""):
@@ -862,8 +1019,7 @@ class GeoGameGUI:
                 self.log("❌ Pays introuvable.")
             else:
                 self.game.player_send_diplomatic_mission(target_country)
-                for msg in self.game.get_and_clear_log():
-                    self.log(msg)
+                self.process_turn_logs()
                 self.update_status()
             # Revenir au tableau de bord
         ttk.Button(frame, text="Envoyer la mission", command=do_mission, style="Accent.TButton").pack(pady=10)
@@ -955,8 +1111,7 @@ class GeoGameGUI:
             btn_frame.pack(fill="x", pady=4)
             def do_action():
                 self.game.player_campaign_action(action_type)
-                for msg in self.game.get_and_clear_log(): self.log(msg)
-                self.switch_view(self.power_content_frame if self.game.player_is_in_power else self.opposition_content_frame, self.my_party_view, "Mon parti")
+                self.process_turn_logs()
             
             ttk.Button(btn_frame, text=text, command=do_action, style="Accent.TButton").pack(side="left", padx=10)
             ttk.Label(btn_frame, text=cost_text).pack(side="left")
@@ -1056,30 +1211,6 @@ class GeoGameGUI:
         frame = ttk.LabelFrame(parent, text=title, style="Card.TLabelframe")
         frame.pack(fill="both", expand=True, padx=20, pady=10)
         
-        # Composition du parlement
-        parliament_frame = ttk.LabelFrame(frame, text="Assemblée Nationale", style="Card.TLabelframe")
-        parliament_frame.pack(fill="x", pady=10)
-
-        # Affichage visuel de l'hémicycle
-        hemicycle_canvas = tk.Canvas(parliament_frame, height=20, bg=self.colors["frame_bg"], highlightthickness=0)
-        hemicycle_canvas.pack(fill="x", padx=10, pady=5)
-        
-        party_colors = {"Centre": "#ffc107", "Droite": "#007bff", "Extrême-droite": "#343a40", "Gauche": "#dc3545", "Extrême-gauche": "#8B0000", "Écologiste": "#28a745", "Divers": "#6c757d"}
-        
-        total_seats = self.france.parliament.total_seats
-        current_pos = 0
-        for party_name, seats in sorted(self.france.parliament.seats_distribution.items(), key=lambda item: item[1], reverse=True):
-            party_ideology = next((p.ideology for p in self.france.political_parties if p.name == party_name), "Divers")
-            color = party_colors.get(party_ideology, "#6c757d")
-            width = (seats / total_seats) * hemicycle_canvas.winfo_width() if hemicycle_canvas.winfo_width() > 1 else (seats / total_seats) * 600
-            hemicycle_canvas.create_rectangle(current_pos, 0, current_pos + width, 20, fill=color, outline="")
-            current_pos += width
-
-        # Légende
-        for party_name, seats in self.france.parliament.seats_distribution.items():
-             ttk.Label(parliament_frame, text=f"• {party_name}: {seats} sièges").pack(anchor="w", padx=10)
-        ttk.Label(parliament_frame, text=f"--- Majorité absolue : {total_seats // 2 + 1} sièges ---", font=("Segoe UI", 10, "italic")).pack(pady=5)
-
         # Soutien populaire
         support_frame = ttk.LabelFrame(frame, text="Soutien Populaire (Sondages)", style="Card.TLabelframe")
         support_frame.pack(fill="x", pady=10)
@@ -1101,7 +1232,7 @@ class GeoGameGUI:
             return
 
         self.france.treasury -= cost
-        self.log(f"📊 Un sondage a été commandé pour {cost} Md€.")
+        messagebox.showinfo("Sondage", f"📊 Un sondage a été commandé pour {cost} Md€.")
         # Affiche les résultats dans une nouvelle fenêtre pour un impact plus fort
         self.politics_menu_ui(parent)
         messagebox.showinfo("Résultats du Sondage", "Les nouvelles intentions de vote sont affichées.")
@@ -1154,8 +1285,7 @@ class GeoGameGUI:
                     tax_changes[tax_key] = new_value - initial_taxes[tax_key]
                 
                 self.game.player_adjust_taxes(tax_changes)
-                for msg in self.game.get_and_clear_log():
-                    self.log(msg)
+                self.process_turn_logs()
                 self.update_status()
                 # Revenir au tableau de bord
             except ValueError as e:
@@ -1184,7 +1314,7 @@ class GeoGameGUI:
             if self.france.name in [war.attacker_leader, war.defender_leader] + war.attacker_allies + war.defender_allies:
                 def propose_peace(war_id=war.id):
                     # Logique de paix à implémenter
-                    self.log(f"🕊️ Une proposition de paix a été envoyée pour le conflit (ID {war_id}).")
+                    messagebox.showinfo("Paix", f"🕊️ Une proposition de paix a été envoyée pour le conflit (ID {war_id}).")
                 ttk.Button(war_frame, text="Proposer la paix (50 Md€)", command=propose_peace).pack(pady=5)
 
     def create_filterable_list(self, parent, items):
@@ -1261,8 +1391,9 @@ class GeoGameGUI:
         for widget in self.root.winfo_children():
             if isinstance(widget, (tk.Text, tk.Listbox)):
                 widget.config(bg=self.colors["frame_bg"], fg=self.colors["text"], insertbackground=self.colors["text"])
-        if hasattr(self, 'log_text'): # S'assurer que le log_text est mis à jour
-             self.log_text.config(bg=self.colors["frame_bg"], fg=self.colors["text"], insertbackground=self.colors["text"])
+        
+        if hasattr(self, 'news_text'): # S'assurer que le panneau de news est mis à jour
+             self.news_text.config(bg=self.colors["frame_bg"], fg=self.colors["text"])
         
         # Forcer la mise à jour des graphiques si nécessaire (exemple)
         # if hasattr(self, 'gov_content_frame') and self.gov_content_frame.winfo_children():
